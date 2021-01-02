@@ -21,6 +21,18 @@ pub struct ServeSystem {
     progress: ProgressBar,
 }
 
+static HTTP_METHODS: &'static [http_types::Method] = &[
+    http_types::Method::Get,
+    http_types::Method::Head,
+    http_types::Method::Post,
+    http_types::Method::Put,
+    http_types::Method::Delete,
+    http_types::Method::Connect,
+    http_types::Method::Options,
+    http_types::Method::Trace,
+    http_types::Method::Patch,
+];
+
 impl ServeSystem {
     /// Construct a new instance.
     pub async fn new(cfg: Arc<RtcServe>, progress: ProgressBar) -> Result<Self> {
@@ -69,10 +81,13 @@ impl ServeSystem {
         if let Some(backend) = &cfg.proxy_backend {
             let handler = Arc::new(ProxyHandlerHttp::new(backend.clone(), cfg.proxy_rewrite.clone()));
             progress.println(format!("{} proxying {} -> {}\n", SERVER, handler.path(), &backend));
-            app.at(handler.path()).strip_prefix().all(move |req| {
+            for &method in HTTP_METHODS.iter() {
                 let handler = handler.clone();
-                async move { handler.proxy_request(req).await }
-            });
+                app.at(handler.path()).strip_prefix().method(method, move |req: Request<State>| {
+                    let handler = handler.clone();
+                    async move { handler.proxy_request(req).await }
+                });
+            }
         } else if let Some(proxies) = &cfg.proxies {
             for proxy in proxies.iter() {
                 let handler = Arc::new(ProxyHandlerHttp::new(proxy.backend.clone(), proxy.rewrite.clone()));
